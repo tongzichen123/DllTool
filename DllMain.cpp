@@ -8,11 +8,13 @@
 #include "MFCApplication1Dlg.h"
 #include "afxdialogex.h"
 #include <tlhelp32.h>
-
+#include "pe.h"
+#include <Psapi.h> 
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
+#include <string>
 
 
 // 用于应用程序“关于”菜单项的 CAboutDlg 对话框
@@ -161,6 +163,75 @@ HCURSOR CMFCApplication1Dlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
 }
+bool GetProcessPath(HANDLE hProcess, wchar_t *szFilePath)
+{
+	szFilePath[0] = '1';
+	wchar_t buff[MAX_PATH];
+	wchar_t DosFilePath[MAX_PATH + 10];
+	ZeroMemory(DosFilePath, sizeof(wchar_t) * (MAX_PATH + 10));
+	if (0 == GetProcessImageFileName(hProcess, DosFilePath, MAX_PATH + 10))
+	{
+		return false;
+	}
+	// 获取Logic Drive String长度  
+	int LDLen = GetLogicalDriveStrings(0, NULL);
+	if (0 == LDLen)
+	{
+		return false;
+	}
+	wchar_t* pLogicDriveString = new wchar_t[MAX_PATH + 10];
+	ZeroMemory(pLogicDriveString, (MAX_PATH + 10) * sizeof(wchar_t));
+	LDLen = GetLogicalDriveStrings(LDLen, pLogicDriveString);
+	if (0 == LDLen)
+	{
+		delete[]pLogicDriveString;
+		return false;
+	}
+
+	wchar_t szDrive[3] = TEXT(" :");
+	wchar_t* pDosDriveName = new wchar_t[MAX_PATH];
+	wchar_t* pLogicIndex = pLogicDriveString;
+
+	do
+	{
+		szDrive[0] = *pLogicIndex;
+		LDLen = QueryDosDevice(szDrive, pDosDriveName, MAX_PATH);
+		if (0 == LDLen)
+		{
+			if (ERROR_INSUFFICIENT_BUFFER != GetLastError())
+			{
+				break;
+			}
+
+			delete[]pDosDriveName;
+			pDosDriveName = new wchar_t[LDLen + 1];
+			LDLen = QueryDosDevice(szDrive, pDosDriveName, LDLen + 1);
+			if (0 == LDLen)
+			{
+				break;
+			}
+		}
+
+		LDLen = _tcslen(pDosDriveName);
+		if (0 == _tcsnicmp(DosFilePath, pDosDriveName, LDLen))
+		{
+			swprintf_s(buff, MAX_PATH, L"%s%s", szDrive, DosFilePath + LDLen);
+			
+			break;
+		}
+
+		while (*pLogicIndex++);
+	} while (*pLogicIndex);
+	int i = 0;
+	delete[]pLogicDriveString;
+	delete[]pDosDriveName;
+	for (i = 0; buff[i]; i++)
+	{
+		szFilePath[i] = buff[i];
+	}
+	szFilePath[i] = '\0';
+	return true;
+}
 
 void CMFCApplication1Dlg::OnBnClickedOk()
 {
@@ -172,6 +243,7 @@ void CMFCApplication1Dlg::OnBnClickedOk()
 	PROCESSENTRY32 pe;
 	SYSTEM_INFO si;
 	wchar_t buff[MAX_PATH + 50];
+
 	pe.dwSize = sizeof PROCESSENTRY32;
 	GetNativeSystemInfo(&si);//获取当前cpu的信息.
 	while (Process32Next(hProcess,&pe))
@@ -180,6 +252,7 @@ void CMFCApplication1Dlg::OnBnClickedOk()
 		{
 			BOOL Is64;
 			HANDLE hp = OpenProcess(PROCESS_ALL_ACCESS, false, pe.th32ProcessID);
+						
 			if (hp == INVALID_HANDLE_VALUE)
 			{
 				MessageBox(L"error"); return;
@@ -215,7 +288,17 @@ void RemoteLoadLibrary(HANDLE hProcess, LPCTSTR lpLibFileName)
 {
 	DWORD ThreadID;
 	//在目标进程中分配一部分内存空间用来存放dll路径
-	LPVOID PMemory = VirtualAllocEx(hProcess, NULL, 0x1000, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+	wchar_t path[MAX_PATH + 10];
+	if (!GetProcessPath(hProcess, path))return;
+
+	int PageSize;
+	//根据进程获取的文件路径创建一个pe对象然后获取其SectionAlignment
+	BasePe ObjPe{path};
+	ObjPe.SetValue();
+	//获取文件的内存中页对齐大小
+
+	PageSize = ObjPe.GetOptionHeaders()->SectionAlignment;
+	LPVOID PMemory = VirtualAllocEx(hProcess, NULL, PageSize, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
 	WriteProcessMemory(hProcess, PMemory, lpLibFileName, lstrlenW(lpLibFileName)*2 + 2, NULL);
 	//dll文件在高地址位，不随程序改变而改变地址，只要在本进程中获取到入口地址
 	//在目标进程中也可以使用
@@ -226,7 +309,7 @@ void RemoteLoadLibrary(HANDLE hProcess, LPCTSTR lpLibFileName)
 	//等待线程运行完毕
 	WaitForSingleObject(hThread, INFINITE);
 	//释放申请的内存空间
-	VirtualFreeEx(hThread, PMemory, 0x1000, MEM_RELEASE);
+	VirtualFreeEx(hThread, PMemory, PageSize, MEM_RELEASE);
 	return;
 }
 
