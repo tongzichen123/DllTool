@@ -302,7 +302,7 @@ void RemoteLoadLibrary(HANDLE hProcess, LPCTSTR lpLibFileName)
 	WriteProcessMemory(hProcess, PMemory, lpLibFileName, lstrlenW(lpLibFileName)*2 + 2, NULL);
 	//dll文件在高地址位，不随程序改变而改变地址，只要在本进程中获取到入口地址
 	//在目标进程中也可以使用
-	HMODULE hModule = LoadLibrary(L"kerne32.dll");
+	HMODULE hModule = LoadLibrary(L"kernel32.dll");
 	LPTHREAD_START_ROUTINE PFThread = (LPTHREAD_START_ROUTINE)(GetProcAddress(hModule, "LoadLibraryW"));
 	//创建线程
 	HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, PFThread, PMemory, 0,&ThreadID);
