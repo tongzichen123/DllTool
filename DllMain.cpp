@@ -198,18 +198,9 @@ bool GetProcessPath(HANDLE hProcess, wchar_t *szFilePath)
 		LDLen = QueryDosDevice(szDrive, pDosDriveName, MAX_PATH);
 		if (0 == LDLen)
 		{
-			if (ERROR_INSUFFICIENT_BUFFER != GetLastError())
-			{
-				break;
-			}
-
+			delete[]pLogicDriveString;
 			delete[]pDosDriveName;
-			pDosDriveName = new wchar_t[LDLen + 1];
-			LDLen = QueryDosDevice(szDrive, pDosDriveName, LDLen + 1);
-			if (0 == LDLen)
-			{
-				break;
-			}
+			return false;
 		}
 
 		LDLen = _tcslen(pDosDriveName);
